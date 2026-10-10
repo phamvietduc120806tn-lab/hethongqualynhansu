@@ -19,6 +19,15 @@ const server = app.listen(PORT, async () => {
   }
 });
 
+// Xử lý bắt lỗi chưa được xử lý toàn cục để server hoạt động bền bỉ
+process.on('uncaughtException', (err) => {
+  console.error('⚠️ Uncaught Exception:', err);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('⚠️ Unhandled Rejection tại:', promise, 'Lý do:', reason);
+});
+
 // Xử lý tắt server an toàn (Graceful Shutdown)
 process.on('SIGTERM', async () => {
   console.log('Đang đóng kết nối HTTP và Prisma...');
@@ -27,3 +36,4 @@ process.on('SIGTERM', async () => {
     process.exit(0);
   });
 });
+
