@@ -1,0 +1,141 @@
+// Prisma Schema for HRMS (Hệ Thống Quản Lý Nhân Sự)
+// Technologies: Node.js, Express, PostgreSQL, Prisma ORM
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ==========================================
+// ENUMS
+// ==========================================
+
+enum Role {
+  ADMIN     // Quản trị viên toàn hệ thống
+  HR        // Bộ phận Nhân sự (Quản lý hồ sơ, duyệt phép, điểm danh)
+  EMPLOYEE  // Nhân viên bình thường
+}
+
+enum LeaveType {
+  ANNUAL       // Nghỉ phép năm có lương
+  SICK         // Nghỉ ốm đau
+  UNPAID       // Nghỉ không hưởng lương
+  MATERNITY    // Nghỉ chế độ thai sản
+  BEREAVEMENT  // Nghỉ việc hiếu, hỷ
+  OTHER        // Lý do khác
+}
+
+enum LeaveStatus {
+  PENDING   // Đang chờ xét duyệt
+  APPROVED  // Đã được duyệt
+  REJECTED  // Bị từ chối
+  CANCELLED // Nhân viên tự hủy yêu cầu
+}
+
+enum AttendanceStatus {
+  PRESENT     // Có mặt, đúng giờ
+  LATE        // Đi trễ
+  EARLY_LEAVE // Về sớm
+  ABSENT      // Vắng mặt không phép
+  HALF_DAY    // Làm việc nửa ngày
+}
+
+// ==========================================
+// MODELS (BẢNG DỮ LIỆU)
+// ==========================================
+
+/// Bảng phòng ban trong công ty
+model Department {
+  id          String    @id @default(uuid())
+  name        String    @unique @db.VarChar(100)
+  description String?   @db.Text
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  // Quan hệ 1-N: Một phòng ban có nhiều nhân viên
+  users       User[]
+
+  @@map("departments")
+}
+
+/// Bảng người dùng / nhân viên
+model User {
+  id           String      @id @default(uuid())
+  name         String      @db.VarChar(100)
+  email        String      @unique @db.VarChar(255)
+  password     String      @db.VarChar(255) // Mật khẩu đã được băm (bcrypt)
+  phone        String?     @db.VarChar(20)
+  role         Role        @default(EMPLOYEE)
+  departmentId String?     @map("department_id")
+  isActive     Boolean     @default(true) @map("is_active")
+  createdAt    DateTime    @default(now()) @map("created_at")
+  updatedAt    DateTime    @updatedAt @map("updated_at")
+
+  // Quan hệ: Thuộc về một phòng ban
+  department   Department? @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+
+  // Quan hệ 1-N: Lịch sử chấm công của nhân viên
+  attendances  Attendance[]
+
+  // Quan hệ 1-N: Các đơn xin nghỉ phép của nhân viên
+  leaveRequests LeaveRequest[] @relation("EmployeeLeaveRequests")
+
+  // Quan hệ 1-N: Các đơn xin nghỉ phép mà người này đã phê duyệt (dành cho Admin / HR)
+  approvedLeaves LeaveRequest[] @relation("ApproverLeaveRequests")
+
+  @@index([departmentId])
+  @@index([role])
+  @@map("users")
+}
+
+/// Bảng chấm công hàng ngày
+model Attendance {
+  id        String           @id @default(uuid())
+  userId    String           @map("user_id")
+  date      DateTime         @db.Date // Ngày chấm công (YYYY-MM-DD)
+  checkIn   DateTime?        @map("check_in") // Thời điểm check-in (timestamp)
+  checkOut  DateTime?        @map("check_out") // Thời điểm check-out (timestamp)
+  status    AttendanceStatus @default(PRESENT)
+  notes     String?          @db.Text
+  createdAt DateTime         @default(now()) @map("created_at")
+  updatedAt DateTime         @updatedAt @map("updated_at")
+
+  // Quan hệ: Bản ghi chấm công thuộc về 1 nhân viên
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Ràng buộc: Mỗi nhân viên chỉ có 1 bản ghi chấm công duy nhất cho mỗi ngày
+  @@unique([userId, date])
+  @@index([userId])
+  @@index([date])
+  @@map("attendance")
+}
+
+/// Bảng yêu cầu xin nghỉ phép
+model LeaveRequest {
+  id            String      @id @default(uuid())
+  userId        String      @map("user_id")
+  leaveType     LeaveType   @default(ANNUAL) @map("leave_type")
+  startDate     DateTime    @db.Date @map("start_date")
+  endDate       DateTime    @db.Date @map("end_date")
+  reason        String?     @db.Text
+  status        LeaveStatus @default(PENDING)
+  approverId    String?     @map("approver_id") // Người duyệt (HR hoặc Admin)
+  approverNotes String?     @db.Text @map("approver_notes")
+  createdAt     DateTime    @default(now()) @map("created_at")
+  updatedAt     DateTime    @updatedAt @map("updated_at")
+
+  // Quan hệ: Đơn nghỉ phép do nhân viên nào tạo
+  user          User        @relation("EmployeeLeaveRequests", fields: [userId], references: [id], onDelete: Cascade)
+
+  // Quan hệ: Đơn nghỉ phép do ai duyệt (tùy chọn)
+  approver      User?       @relation("ApproverLeaveRequests", fields: [approverId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([status])
+  @@index([startDate, endDate])
+  @@map("leave_requests")
+}
